@@ -15,10 +15,7 @@ class ExchangeSimulator:
     
     def __init__(self, marketData_2_exchSim_q, platform_2_exchSim_order_q, exchSim_2_platform_execution_q):
         print("[%d]<<<<< call ExchSim.init" % (os.getpid(),))
-        self.sask = 0
-        self.sbid = 0
-        self.fask = 0
-        self.fbid = 0
+        self.quotes = {}
         self.execID = 0
         self.limit_order_q = Queue()
         self.stock_ticker = '2330'
@@ -32,8 +29,12 @@ class ExchangeSimulator:
     def consume_md(self, marketData_2_exchSim_q, exchSim_2_platform_execution_q):
         while True:
             res = marketData_2_exchSim_q.get()
-            self.ask = res.askPrice1
-            self.bid = res.bidPrice1
+            if res.ticker in self.quotes.keys():
+                self.quotes[res.ticker]['ask'] = res.askPrice1
+                self.quotes[res.ticker]['bid'] = res.bidPrice1
+            else:
+                self.quotes[res.ticker] = {'ask':res.askPrice1, 'bid':res.bidPrice1}
+                
             qsize = self.limit_order_q.qsize()
             for i in range(qsize):
                 limit_order = self.limit_order_q.get()
@@ -58,21 +59,25 @@ class ExchangeSimulator:
         execution.size = order.size
         return execution
         
-        
     def produce_execution(self, order, exchSim_2_platform_execution_q):
+        tkr = order.ticker
+        if tkr not in self.quotes.keys():
+            self.limit_order_q.put(order)
+            return
         if order.type == 'MO':
             if order.direction == 1:
-                execution = self.execute(order, self.askPrice1)
+                execution = self.execute(order, self.quotes[tkr]['ask'])
             elif order.direction == -1:
-                execution = self.execute(order, self.bidPrice1)
+                execution = self.execute(order, self.quotes[tkr]['bid'])
         elif order.type == 'LO':
-            if order.direction == 1 and order.price >= self.askPrice1:
-                execution = self.execute(order, self.askPrice1)
-            elif order.direction == -1 and order.price <= self.bidPrice1:
-                execution = self.execute(order, self.bidPrice1)
-            elif (order.direction == 1 and order.price < self.askPrice1) or\
-                    (order.direction == -1 and order.price > self.bidPrice1):
+            if order.direction == 1 and order.price >= self.quotes[tkr]['ask']:
+                execution = self.execute(order, self.quotes[tkr]['ask'])
+            elif order.direction == -1 and order.price <= self.quotes[tkr]['bid']:
+                execution = self.execute(order, self.quotes[tkr]['ask'])
+            elif (order.direction == 1 and order.price < self.quotes[tkr]['ask']) or\
+                    (order.direction == -1 and order.price > self.quotes[tkr]['bid']):
                 self.limit_order_q.put(order)
+                return
         exchSim_2_platform_execution_q.put(execution)
         print('[%d]ExchSim.produce_execution' % (os.getpid()))
         print(execution.outputAsArray())
